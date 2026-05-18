@@ -3702,9 +3702,11 @@ async function executarLote(canal) {
   if (!canal)  { resEl.className='lote-result err'; resEl.textContent='Selecione o canal.'; return; }
   if (!LOTE_ALUNOS || !LOTE_ALUNOS.length) { resEl.className='lote-result err'; resEl.textContent='Nenhum aluno selecionado.'; return; }
 
-  // Mostrar progresso
+  // Mostrar progresso — usar setTimeout para garantir render antes do loop
   resEl.className='lote-result';
+  resEl.style.display='block';
   resEl.textContent = '⏳ Processando ' + LOTE_ALUNOS.length + ' alunos...';
+  await new Promise(function(res){ setTimeout(res, 50); }); // aguarda 1 frame de render
 
 
   localStorage.setItem('crm_last_atend', atend);
@@ -3763,9 +3765,10 @@ async function executarLote(canal) {
     }
   }
 
-  // Salvar history
+  // Salvar history — STORE + localStorage direto como garantia
   var cfg = BASE_CONFIG[ACTIVE_BASE];
   await STORE.set(cfg.storageH, HISTORY);
+  try { localStorage.setItem(cfg.storageH, JSON.stringify(HISTORY)); } catch(e) {}
 
   // Exportar CSV para WhatsApp
   if (canal === 'WhatsApp' && rows.length > 0) {
@@ -3793,13 +3796,16 @@ async function executarLote(canal) {
       return;
     }
     resEl.className='lote-result';
-    resEl.textContent = '⏳ Enviando ' + emailList.length + ' e-mails...';
-    for (var j = 0; j < emailList.length; j++) {
-      await gasCall('sendEmail', {
-        to:      emailList[j].email,
-        subject: emailList[j].subj,
-        body:    emailList[j].msg
-      });
+    resEl.textContent = '⏳ Enviando ' + emailList.length + ' e-mails via GAS...';
+    // Envio em lote único — uma só chamada ao GAS com todos os destinatários
+    var emailPayload = emailList.map(function(e) {
+      return { to: e.email, subject: e.subj, body: e.msg, nome: e.nome };
+    });
+    var emailResult = await gasCall('sendEmailLote', { emails: emailPayload });
+    if (emailResult && !emailResult.ok) {
+      resEl.className = 'lote-result err';
+      resEl.textContent = 'Erro ao enviar e-mails: ' + (emailResult.error || 'verifique o GAS.');
+      return;
     }
   }
 
