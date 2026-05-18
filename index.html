@@ -400,6 +400,26 @@ tbody tr.flagged td { background: #fff9f9; }
 .send-btn-email { background:#3b5bdb; color:#fff; }
 .send-btn-copy  { background:var(--surface2); color:var(--text); border:1px solid var(--border); }
 .send-status { font-size:11px; color:var(--text3); margin-top:4px; min-height:16px; }
+
+/* ====== DISPARO EM LOTE ====== */
+.lote-bar{background:var(--surface);border-bottom:1px solid var(--border);padding:8px 20px;display:none;align-items:center;gap:10px;flex-wrap:wrap;font-size:12px}
+.lote-bar.active{display:flex}
+.lote-count{font-weight:700;color:var(--accent)}
+.cb-col{width:36px;text-align:center;padding:0 !important}
+input[type=checkbox].row-cb,input[type=checkbox]#cb-all{width:15px;height:15px;cursor:pointer;accent-color:var(--accent)}
+.lote-overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:3000;display:flex;align-items:center;justify-content:center}
+.lote-box{background:var(--surface);border-radius:var(--radius-lg);width:540px;max-width:96vw;max-height:88vh;display:flex;flex-direction:column;box-shadow:0 8px 40px rgba(0,0,0,.25);overflow:hidden}
+.lote-header{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+.lote-header h3{font-size:15px;font-weight:700;margin:0}
+.lote-body{flex:1;overflow-y:auto;padding:16px 20px}
+.lote-footer{padding:12px 20px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end;flex-shrink:0;flex-wrap:wrap}
+.lote-field{margin-bottom:12px}
+.lote-field label{font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.4px;display:block;margin-bottom:5px}
+.lote-field select,.lote-field input{width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--surface)}
+.lote-preview{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px;font-size:12px;line-height:1.7;white-space:pre-wrap;max-height:140px;overflow-y:auto;margin-top:6px}
+.lote-result{margin-top:10px;font-size:12px;padding:8px 12px;border-radius:6px;white-space:pre-line}
+.lote-result.ok{background:#ebfbee;color:#276b35}
+.lote-result.err{background:#fff5f5;color:#c92a2a}
 </style>
   <link rel="manifest" href="manifest.json">
   <meta name="theme-color" content="#3b5bdb">
@@ -530,11 +550,18 @@ tbody tr.flagged td { background: #fff9f9; }
       </div>
       <button class="btn btn-sm" onclick="clearFilters()">Limpar</button>
       <button class="btn btn-sm" onclick="exportFilteredCSV()" title="Baixar alunos filtrados para disparo" style="border-color:var(--accent);color:var(--accent-text);background:var(--accent-bg)">📤 Exportar filtro</button>
+      <button class="btn btn-sm btn-primary" onclick="abrirLoteFiltro()" title="Disparar para todos os alunos filtrados">📨 Disparar em lote</button>
       <div class="filter-count" id="filter-count"></div>
     </div>
-    <div class="table-container" id="table-container">
+    <div id="lote-bar" class="lote-bar">
+  <span>📋 <span class="lote-count" id="lote-count">0</span> alunos selecionados</span>
+  <button class="btn btn-sm btn-primary" onclick="abrirLoteSel()">📨 Disparar selecionados</button>
+  <button class="btn btn-sm" onclick="limparSelecao()">✕ Limpar seleção</button>
+</div>
+<div class="table-container" id="table-container">
       <table id="main-table">
         <thead><tr>
+          <th class="cb-col"><input type="checkbox" id="cb-all" onclick="toggleAllCb(this)" title="Selecionar todos"></th>
           <th>#</th>
           <th>Prioridade</th>
           <th>Aluno</th>
@@ -701,6 +728,54 @@ tbody tr.flagged td { background: #fff9f9; }
       <div class="relatorio-footer">
         <button class="btn btn-primary" onclick="enviarRelatorioDiarioGAS()" title="Enviar por e-mail via GAS">📧 Enviar por e-mail</button>
         <button class="btn" onclick="fecharRelatorio()">Fechar</button>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- MODAL DISPARO EM LOTE -->
+  <div class="lote-overlay" id="lote-overlay" style="display:none" onclick="if(event.target===this)fecharLote()">
+    <div class="lote-box">
+      <div class="lote-header">
+        <h3 id="lote-title">📨 Disparo em Lote</h3>
+        <button class="btn btn-sm" onclick="fecharLote()">✕</button>
+      </div>
+      <div class="lote-body">
+        <div class="lote-field">
+          <label>Atendente</label>
+          <input type="text" id="lote-atend" placeholder="Seu nome">
+        </div>
+        <div class="lote-field">
+          <label>Motivo</label>
+          <select id="lote-motivo" onchange="atualizarPreviewLote()">
+            <option value="">Selecione...</option>
+            <option value="financeiro">💰 Financeiro</option>
+            <option value="academico">📚 Acadêmico</option>
+          </select>
+        </div>
+        <div class="lote-field">
+          <label>Canal</label>
+          <select id="lote-canal" onchange="atualizarPreviewLote()">
+            <option value="">Selecione...</option>
+            <option value="WhatsApp">💬 WhatsApp</option>
+            <option value="E-mail">✉️ E-mail</option>
+          </select>
+        </div>
+        <div class="lote-field">
+          <label>Observação (opcional)</label>
+          <input type="text" id="lote-obs" placeholder="Ex: Disparo em lote — campanha maio/2026">
+        </div>
+        <div class="lote-field" id="lote-preview-wrap" style="display:none">
+          <label>Preview da mensagem (1° aluno)</label>
+          <div class="lote-preview" id="lote-preview"></div>
+        </div>
+        <div id="lote-result"></div>
+      </div>
+      <div class="lote-footer">
+        <span style="font-size:12px;color:var(--text3);align-self:center" id="lote-footer-info"></span>
+        <button class="btn" onclick="fecharLote()">Cancelar</button>
+        <button class="btn btn-primary" id="lote-btn-wa" onclick="executarLote('WhatsApp')" style="display:none">📥 Exportar CSV WhatsApp</button>
+        <button class="btn btn-primary" id="lote-btn-email" onclick="executarLote('E-mail')" style="display:none">✉️ Enviar E-mails</button>
       </div>
     </div>
   </div>
@@ -1212,6 +1287,7 @@ function renderTable() {
     tbody.innerHTML = rows.map((r, i) => {
       const globalI = start + i + 1;
       return `<tr>
+        <td class="cb-col"><input type="checkbox" class="row-cb" value="${r.COD_MATRICULA}" onchange="onCbChange()"></td>
         <td style="color:var(--text3);font-size:11px">${globalI}</td>
         <td>${prioBadge(r)}</td>
         <td style="font-weight:600;max-width:180px;overflow:hidden;text-overflow:ellipsis">${cap(r.NOM_ALUNO)}</td>
@@ -3530,6 +3606,193 @@ function baixarRelatorio() {
   a.href = url; a.download = `relatorio-crm-${hoje}.txt`; a.click();
   URL.revokeObjectURL(url);
   showToast('📄 Relatório baixado!');
+}
+
+// ================================================================
+// DISPARO EM LOTE
+// ================================================================
+let LOTE_ALUNOS = []; // array de registros a disparar
+
+// ── Checkbox na tabela ──
+function toggleAllCb(cb) {
+  document.querySelectorAll('.row-cb').forEach(function(el) { el.checked = cb.checked; });
+  onCbChange();
+}
+
+function onCbChange() {
+  var checked = Array.from(document.querySelectorAll('.row-cb:checked')).map(function(el) { return el.value; });
+  var bar = document.getElementById('lote-bar');
+  var cnt = document.getElementById('lote-count');
+  if (bar) bar.classList.toggle('active', checked.length > 0);
+  if (cnt) cnt.textContent = checked.length;
+}
+
+function limparSelecao() {
+  document.querySelectorAll('.row-cb, #cb-all').forEach(function(el) { el.checked = false; });
+  onCbChange();
+}
+
+// ── Abrir modal pelo filtro ──
+function abrirLoteFiltro() {
+  if (!FILTERED.length) { showToast('Nenhum aluno no filtro atual.'); return; }
+  LOTE_ALUNOS = FILTERED.slice();
+  abrirLoteModal('Filtro atual — ' + FILTERED.length + ' alunos');
+}
+
+// ── Abrir modal pela seleção ──
+function abrirLoteSel() {
+  var mats = Array.from(document.querySelectorAll('.row-cb:checked')).map(function(el) { return el.value; });
+  if (!mats.length) { showToast('Selecione pelo menos 1 aluno.'); return; }
+  LOTE_ALUNOS = mats.map(function(m) { return DB.find(function(r) { return r.COD_MATRICULA === m; }); }).filter(Boolean);
+  abrirLoteModal(LOTE_ALUNOS.length + ' alunos selecionados');
+}
+
+function abrirLoteModal(titulo) {
+  document.getElementById('lote-title').textContent = '📨 Disparo em Lote — ' + titulo;
+  document.getElementById('lote-footer-info').textContent = LOTE_ALUNOS.length + ' alunos';
+  document.getElementById('lote-atend').value = localStorage.getItem('crm_last_atend') || '';
+  document.getElementById('lote-motivo').value = '';
+  document.getElementById('lote-canal').value = '';
+  document.getElementById('lote-obs').value = '';
+  document.getElementById('lote-preview-wrap').style.display = 'none';
+  document.getElementById('lote-result').textContent = '';
+  document.getElementById('lote-btn-wa').style.display = 'none';
+  document.getElementById('lote-btn-email').style.display = 'none';
+  document.getElementById('lote-overlay').style.display = 'flex';
+}
+
+function fecharLote() {
+  document.getElementById('lote-overlay').style.display = 'none';
+}
+
+function atualizarPreviewLote() {
+  var motivo = document.getElementById('lote-motivo').value;
+  var canal  = document.getElementById('lote-canal').value;
+  var btnWa  = document.getElementById('lote-btn-wa');
+  var btnEmail = document.getElementById('lote-btn-email');
+  var wrap   = document.getElementById('lote-preview-wrap');
+  var prev   = document.getElementById('lote-preview');
+
+  btnWa.style.display    = (canal === 'WhatsApp' && motivo) ? '' : 'none';
+  btnEmail.style.display = (canal === 'E-mail'   && motivo) ? '' : 'none';
+
+  if (motivo && canal && LOTE_ALUNOS.length > 0) {
+    var msg = buildMessage(LOTE_ALUNOS[0], motivo, canal);
+    if (msg) { prev.textContent = msg; wrap.style.display = ''; }
+    else { wrap.style.display = 'none'; }
+  } else {
+    wrap.style.display = 'none';
+  }
+}
+
+// ── Executar disparo ──
+async function executarLote(canal) {
+  var atend  = document.getElementById('lote-atend').value.trim();
+  var motivo = document.getElementById('lote-motivo').value;
+  var obs    = document.getElementById('lote-obs').value.trim();
+  var resEl  = document.getElementById('lote-result');
+
+  if (!atend)  { resEl.className='lote-result err'; resEl.textContent='Informe o atendente.'; return; }
+  if (!motivo) { resEl.className='lote-result err'; resEl.textContent='Selecione o motivo.'; return; }
+
+  localStorage.setItem('crm_last_atend', atend);
+
+  var semContato = [], semMsg = [], comSucesso = [];
+  var now = new Date();
+  var datetime = now.toLocaleString('pt-BR');
+  var date     = now.toLocaleDateString('pt-BR');
+
+  // Registrar acionamento para cada aluno + coletar dados para exportação
+  var rows = []; // para CSV WhatsApp
+  var emailList = []; // para e-mail
+
+  for (var i = 0; i < LOTE_ALUNOS.length; i++) {
+    var r = LOTE_ALUNOS[i];
+    var c = CONTACTS[r.COD_MATRICULA] || {};
+    var tel   = (c.cel   || r.NUM_TELEF_CELULAR || '').replace(/\D/g,'');
+    var email = c.email  || r.END_EMAIL || '';
+    var msg   = buildMessage(r, motivo, canal) || '';
+
+    // Verificar contato
+    if (canal === 'WhatsApp' && !tel)   { semContato.push(r.NOM_ALUNO); continue; }
+    if (canal === 'E-mail'   && !email) { semContato.push(r.NOM_ALUNO); continue; }
+    if (!msg) { semMsg.push(r.NOM_ALUNO); continue; }
+
+    // Registrar acionamento
+    if (!HISTORY[r.COD_MATRICULA]) HISTORY[r.COD_MATRICULA] = [];
+    var entry = {
+      datetime: datetime, date: date,
+      atend: atend, canal: canal, tipo: canal,
+      motivo: motivo, obs: obs || ('Disparo em lote — ' + LOTE_ALUNOS.length + ' alunos'),
+      nps: '', nps_tipo: '',
+      matricula: r.COD_MATRICULA,
+      base: ACTIVE_BASE
+    };
+    HISTORY[r.COD_MATRICULA].push(entry);
+    if (GAS_URL) gasCall('saveAction', entry);
+
+    comSucesso.push(r.NOM_ALUNO);
+
+    if (canal === 'WhatsApp') {
+      var waNum = tel.startsWith('55') ? tel : '55' + tel;
+      rows.push({ nome: cap(r.NOM_ALUNO), numero: waNum, mensagem: msg, matricula: r.COD_MATRICULA, curso: r.NOM_CURSO });
+    }
+    if (canal === 'E-mail') {
+      emailList.push({ email: email, nome: cap(r.NOM_ALUNO), msg: msg, matricula: r.COD_MATRICULA });
+    }
+  }
+
+  // Salvar history
+  var cfg = BASE_CONFIG[ACTIVE_BASE];
+  await STORE.set(cfg.storageH, HISTORY);
+
+  // Exportar CSV para WhatsApp
+  if (canal === 'WhatsApp' && rows.length > 0) {
+    var bom = '\uFEFF';
+    var header = 'MATRICULA;NOME;NUMERO;MENSAGEM;CURSO';
+    var body = rows.map(function(row) {
+      var msg2 = row.mensagem.replace(/"/g,'""');
+      return row.matricula + ';' + row.nome + ';' + row.numero + ';"' + msg2 + '";' + row.curso;
+    }).join('\n');
+    var csv = bom + header + '\n' + body;
+    var blob = new Blob([csv], {type:'text/csv;charset=utf-8'});
+    var url  = URL.createObjectURL(blob);
+    var a    = document.createElement('a');
+    a.href = url;
+    a.download = 'disparo-whatsapp-' + new Date().toLocaleDateString('pt-BR').replace(/\//g,'-') + '-' + rows.length + 'alunos.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  // Enviar e-mails via GAS
+  if (canal === 'E-mail' && emailList.length > 0) {
+    if (!GAS_URL) {
+      resEl.className='lote-result err';
+      resEl.textContent = 'Configure o GAS URL para enviar e-mails.';
+      return;
+    }
+    resEl.className='lote-result';
+    resEl.textContent = '⏳ Enviando ' + emailList.length + ' e-mails...';
+    var subj = 'Estácio Volta Redonda — ' + (motivo === 'financeiro' ? 'Pendência Financeira' : 'Acompanhamento Acadêmico');
+    for (var j = 0; j < emailList.length; j++) {
+      await gasCall('sendEmail', { to: emailList[j].email, subject: subj, body: emailList[j].msg });
+    }
+  }
+
+  // Atualizar UI
+  applyFilters();
+  renderDashboard();
+  renderProdutividade();
+  updatePriorityCounts();
+  limparSelecao();
+
+  // Resultado
+  var txt = '✅ ' + comSucesso.length + ' acionamentos registrados.';
+  if (canal === 'WhatsApp') txt += ' CSV exportado com ' + rows.length + ' números.';
+  if (canal === 'E-mail')   txt += ' ' + emailList.length + ' e-mails enviados.';
+  if (semContato.length) txt += '\n⚠️ ' + semContato.length + ' sem contato: ' + semContato.slice(0,5).join(', ') + (semContato.length>5?'...':'');
+  resEl.className = 'lote-result ok';
+  resEl.textContent = txt;
 }
 
 </script>
