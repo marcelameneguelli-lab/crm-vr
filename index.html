@@ -907,7 +907,9 @@ let CURRENT_MAT = null;
 let filterTimer = null;
 
 // ========== STORAGE — GAS (compartilhado) + localStorage (fallback) ==========
-let GAS_URL = localStorage.getItem('crm_gas_url') || '';
+// URL do GAS embutida — pode ser sobrescrita pelo campo de configuração
+const GAS_URL_DEFAULT = 'https://script.google.com/macros/s/AKfycbxLEMQ7c1ToIExilsDUjVRPuj238sk0c5A0rdyYT08fGrhCPpXgx3xD89jbpliBk2qI/exec';
+let GAS_URL = localStorage.getItem('crm_gas_url') || GAS_URL_DEFAULT;
 
 // In-memory fallback when localStorage is unavailable or full
 const _memStore = {};
@@ -1094,7 +1096,7 @@ async function init() {
   updatePriorityCounts();
   // Init GAS URL input
   const gasInput = document.getElementById('gas-url-input');
-  if (gasInput && GAS_URL) gasInput.value = GAS_URL;
+  if (gasInput) gasInput.value = GAS_URL;
   // Sync from GAS immediately on load (don't wait 15s)
   if (GAS_URL) {
     syncFromRemote().then(() => {
@@ -3689,11 +3691,21 @@ function atualizarPreviewLote() {
 async function executarLote(canal) {
   var atend  = document.getElementById('lote-atend').value.trim();
   var motivo = document.getElementById('lote-motivo').value;
+  var canalSel = document.getElementById('lote-canal').value;
+  // Usar o canal do select se não foi passado explicitamente
+  if (!canal || canal === '') canal = canalSel;
   var obs    = document.getElementById('lote-obs').value.trim();
   var resEl  = document.getElementById('lote-result');
 
   if (!atend)  { resEl.className='lote-result err'; resEl.textContent='Informe o atendente.'; return; }
   if (!motivo) { resEl.className='lote-result err'; resEl.textContent='Selecione o motivo.'; return; }
+  if (!canal)  { resEl.className='lote-result err'; resEl.textContent='Selecione o canal.'; return; }
+  if (!LOTE_ALUNOS || !LOTE_ALUNOS.length) { resEl.className='lote-result err'; resEl.textContent='Nenhum aluno selecionado.'; return; }
+
+  // Mostrar progresso
+  resEl.className='lote-result';
+  resEl.textContent = '⏳ Processando ' + LOTE_ALUNOS.length + ' alunos...';
+
 
   localStorage.setItem('crm_last_atend', atend);
 
@@ -3718,6 +3730,15 @@ async function executarLote(canal) {
     if (canal === 'E-mail'   && !email) { semContato.push(r.NOM_ALUNO); continue; }
     if (!msg) { semMsg.push(r.NOM_ALUNO); continue; }
 
+    // Para e-mail: separar assunto do corpo se vier junto
+    var emailSubj = 'Estácio Volta Redonda — ' + (motivo === 'financeiro' ? 'Pendência Financeira' : 'Acompanhamento Acadêmico');
+    var emailBody = msg;
+    if (msg.startsWith('Assunto:')) {
+      var lines = msg.split('\n');
+      emailSubj = lines[0].replace('Assunto:', '').trim();
+      emailBody = lines.slice(1).join('\n').trim();
+    }
+
     // Registrar acionamento
     if (!HISTORY[r.COD_MATRICULA]) HISTORY[r.COD_MATRICULA] = [];
     var entry = {
@@ -3738,7 +3759,7 @@ async function executarLote(canal) {
       rows.push({ nome: cap(r.NOM_ALUNO), numero: waNum, mensagem: msg, matricula: r.COD_MATRICULA, curso: r.NOM_CURSO });
     }
     if (canal === 'E-mail') {
-      emailList.push({ email: email, nome: cap(r.NOM_ALUNO), msg: msg, matricula: r.COD_MATRICULA });
+      emailList.push({ email: email, nome: cap(r.NOM_ALUNO), msg: emailBody, subj: emailSubj, matricula: r.COD_MATRICULA });
     }
   }
 
@@ -3773,9 +3794,12 @@ async function executarLote(canal) {
     }
     resEl.className='lote-result';
     resEl.textContent = '⏳ Enviando ' + emailList.length + ' e-mails...';
-    var subj = 'Estácio Volta Redonda — ' + (motivo === 'financeiro' ? 'Pendência Financeira' : 'Acompanhamento Acadêmico');
     for (var j = 0; j < emailList.length; j++) {
-      await gasCall('sendEmail', { to: emailList[j].email, subject: subj, body: emailList[j].msg });
+      await gasCall('sendEmail', {
+        to:      emailList[j].email,
+        subject: emailList[j].subj,
+        body:    emailList[j].msg
+      });
     }
   }
 
