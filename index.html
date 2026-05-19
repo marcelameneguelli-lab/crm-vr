@@ -605,7 +605,11 @@ input[type=checkbox].row-cb,input[type=checkbox]#cb-all{width:15px;height:15px;c
         <option value="pendente">Futuros</option>
         <option value="concluido">Concluídos</option>
       </select>
+      <select id="fu-atend-filter" onchange="renderFollowup()" style="height:28px;padding:0 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--surface)">
+        <option value="">Todos os atendentes</option>
+      </select>
       <span id="fu-count" style="font-size:12px;color:var(--text3)"></span>
+      <button class="btn btn-sm" onclick="sincFuGAS()" title="Buscar follow-ups de todos os atendentes">☁️ Sincronizar</button>
       <button class="btn btn-sm" onclick="renderFollowup()" style="margin-left:auto">↻ Atualizar</button>
     </div>
 
@@ -976,26 +980,42 @@ async function syncFromRemote() {
         changed = true;
       }
     }
-    // Sync base de alunos — only update if server has newer version
-    if (dr && dr.ok && dr.data && dr.ts) {
+    // Sync base de alunos — JSON direto do GAS (sem compressão)
+    const drJson = await gasCall('getDBJson', { base: ACTIVE_BASE });
+    if (drJson && drJson.ok && drJson.data && drJson.ts) {
       const localTs = parseInt(localStorage.getItem('crm_db_server_ts') || '0');
-      if (dr.ts > localTs && dr.data !== '__chunked__') {
+      if (drJson.ts > localTs) {
         try {
-          const newDB = await decompressB64(dr.data);
+          const newDB = JSON.parse(drJson.data);
           if (newDB && newDB.length > 0) {
-            DB = newDB;
-            FILTERED = [...DB];
-            // Salvar na chave da base ativa (saveDB agora é base-aware)
-      await saveDB(DB);
-            localStorage.setItem('crm_db_server_ts', String(dr.ts));
-            populateSemFilter();
-            updatePriorityCounts();
-            changed = true;
-            showToast('📥 Base atualizada: ' + DB.length.toLocaleString('pt-BR') + ' alunos (' + (dr.imported_by||'') + ')');
+            DB = newDB; FILTERED = [...DB];
+            await saveDB(DB);
+            localStorage.setItem('crm_db_server_ts', String(drJson.ts));
+            populateSemFilter(); updatePriorityCounts(); changed = true;
+            showToast('📥 Base atualizada: ' + DB.length.toLocaleString('pt-BR') + ' alunos (' + (drJson.imported_by||'') + ')');
           }
         } catch(e) { console.warn('DB sync error:', e); }
       }
     }
+    // Sync follow-ups
+    const frSync = await gasCall('getFollowups', { base: ACTIVE_BASE });
+    if (frSync && frSync.ok && frSync.data) {
+      let novos = 0;
+      Object.entries(frSync.data).forEach(([mat, fus]) => {
+        if (!FOLLOWUPS[mat]) FOLLOWUPS[mat] = [];
+        const keys = new Set(FOLLOWUPS[mat].map(f => (f.created||'')+(f.date||'')+(f.atend||'')));
+        fus.forEach(fu => {
+          const k = (fu.created||'')+(fu.date||'')+(fu.atend||'');
+          if (!keys.has(k)) { FOLLOWUPS[mat].push(fu); novos++; }
+        });
+      });
+      if (novos > 0) {
+        await STORE.set(BASE_CONFIG[ACTIVE_BASE].storageF, FOLLOWUPS);
+        try { localStorage.setItem(BASE_CONFIG[ACTIVE_BASE].storageF, JSON.stringify(FOLLOWUPS)); } catch(e) {}
+        changed = true;
+      }
+    }
+
     if (lbl) {
       const ts = new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
       lbl.textContent = 'Sheets ' + ts;
@@ -2428,8 +2448,16 @@ async function adminClearAtend() {
       localStorage.setItem(cfg.storageH, JSON.stringify(hist));
     }
   }
-  // Limpar _memStore de todos os historys para forçar releitura
+  // Limpar _memStore
   Object.keys(BASE_CONFIG).forEach(function(bk) { delete _memStore[BASE_CONFIG[bk].storageH]; });
+  // Enviar historico limpo ao GAS para todos verem
+  if (GAS_URL) {
+    for (var bk2 in BASE_CONFIG) {
+      var h2 = bk2 === ACTIVE_BASE ? HISTORY : {};
+      try { var r2 = localStorage.getItem(BASE_CONFIG[bk2].storageH); if (r2) h2 = JSON.parse(r2); } catch(e) {}
+      gasCall('saveHistoryFull', { history: h2, base: bk2 }).catch(function(){});
+    }
+  }
   renderTable(); renderDashboard(); renderProdutividade(); updatePriorityCounts();
   document.getElementById('admin-result').innerHTML = '<span style="color:var(--green)">✓ ' + total + ' acionamentos de "' + atend + '" removidos em todas as bases.</span>';
 }
@@ -2506,12 +2534,17 @@ async function loadFollowups() {
 }
 
 async function saveFollowups() {
-  await STORE.set(BASE_CONFIG[ACTIVE_BASE].storageF, FOLLOWUPS);
+  const cfg = BASE_CONFIG[ACTIVE_BASE];
+  try { localStorage.setItem(cfg.storageF, JSON.stringify(FOLLOWUPS)); } catch(e) {}
+  await STORE.set(cfg.storageF, FOLLOWUPS);
+  if (GAS_URL) gasCall('saveFollowup', { followups: FOLLOWUPS, base: ACTIVE_BASE }).catch(function(){});
 }
 
 function renderFollowup() {
   const filterEl = document.getElementById('fu-filter');
   const filter = filterEl ? filterEl.value : 'todos';
+  const atendFilterEl = document.getElementById('fu-atend-filter');
+  const atendFilter = atendFilterEl ? atendFilterEl.value : '';
   const today = todayStr();
 
   // Coletar todos os follow-ups com dados do aluno
@@ -2522,6 +2555,14 @@ function renderFollowup() {
       allItems.push({ mat, fu, idx, r });
     });
   });
+
+  // Popular select de atendentes
+  if (atendFilterEl) {
+    const atends = [...new Set(allItems.map(({fu}) => fu.atend || '').filter(Boolean))].sort();
+    const cur = atendFilterEl.value;
+    atendFilterEl.innerHTML = '<option value="">Todos os atendentes</option>' +
+      atends.map(a => '<option value="' + a + '"' + (a===cur?' selected':'') + '>' + a + '</option>').join('');
+  }
 
   // Separar por status para o Kanban (sempre mostra pendentes, independente do filtro)
   const late   = allItems.filter(({fu}) => !fu.done && fu.date && fu.date < today);
@@ -2535,6 +2576,7 @@ function renderFollowup() {
 
   // Filtrar para a lista
   let items = allItems.filter(({fu}) => {
+    if (atendFilter && (fu.atend || '') !== atendFilter) return false;
     if (filter === 'concluido') return fu.done;
     if (fu.done) return false;
     if (filter === 'pendente') return !fu.date || fu.date > today;
@@ -2615,6 +2657,26 @@ function renderFollowup() {
     '</tbody></table>';
 }
 
+
+async function sincFuGAS() {
+  if (!GAS_URL) { renderFollowup(); return; }
+  try {
+    const result = await gasCall('getFollowups', { base: ACTIVE_BASE });
+    if (!result || !result.ok || !result.data) { renderFollowup(); return; }
+    let novos = 0;
+    Object.entries(result.data).forEach(([mat, fus]) => {
+      if (!FOLLOWUPS[mat]) FOLLOWUPS[mat] = [];
+      const keys = new Set(FOLLOWUPS[mat].map(f => (f.created||'')+(f.date||'')+(f.atend||'')));
+      fus.forEach(fu => {
+        const k = (fu.created||'')+(fu.date||'')+(fu.atend||'');
+        if (!keys.has(k)) { FOLLOWUPS[mat].push(fu); novos++; }
+      });
+    });
+    if (novos > 0) { await saveFollowups(); showToast('✅ '+novos+' follow-ups sincronizados.'); }
+  } catch(e) {}
+  renderFollowup();
+}
+
 function fmtDate(s) {
   if (!s) return '';
   const [y,m,d] = s.split('-');
@@ -2665,7 +2727,7 @@ function showPage(p) {
     if (dashEl2) dashEl2.innerHTML = '';
     renderDashboard();
   }
-  if (p === 'followup')  renderFollowup();
+  if (p === 'followup')  { if (GAS_URL) sincFuGAS(); else renderFollowup(); }
   if (p === 'produtividade') renderProdutividade();
   if (p === 'importar')     updateImportLabel();
 }
