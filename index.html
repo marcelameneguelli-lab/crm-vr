@@ -2186,30 +2186,22 @@ function processFile(file) {
 
       const semLabel = document.getElementById('import-sem-label') ? document.getElementById('import-sem-label').value : '';
 
-      // Push to GAS so other users get the new base
+      // Push ao GAS — JSON direto, sem compressão (funciona em file:// e https://)
       if (GAS_URL) {
-        // Compress async without blocking UI
         try {
           const importedBy = localStorage.getItem('crm_last_atend') || 'importador';
-          const json = JSON.stringify(DB);
-          const bytes = new TextEncoder().encode(json);
-          const cs = new CompressionStream('gzip');
-          const w = cs.writable.getWriter();
-          w.write(bytes); w.close();
-          const chunks = []; const reader = cs.readable.getReader();
-          while(true){ const{done,value}=await reader.read(); if(done)break; chunks.push(value); }
-          let tot=0; chunks.forEach(c=>tot+=c.length);
-          const all=new Uint8Array(tot); let p=0; chunks.forEach(c=>{all.set(c,p);p+=c.length;});
-          let bin=''; all.forEach(b=>bin+=String.fromCharCode(b));
-          const compressed = btoa(bin);
-          gasCall('saveDB', {
-            compressed,
+          const ts = Date.now();
+          gasCall('saveDBJson', {
+            data: JSON.stringify(DB),
+            ts: ts,
+            base: ACTIVE_BASE,
+            imported_by: importedBy,
             label: (BASE_CONFIG[ACTIVE_BASE].label + ' ' + (semLabel || new Date().toLocaleDateString('pt-BR'))).trim(),
-            total: DB.length,
-            imported_by: importedBy
-          });
-          localStorage.setItem('crm_db_server_ts', String(Date.now()));
-          showToast('✅ Base enviada — todos verão em até 15s');
+            total: DB.length
+          }).then(function(r) {
+            if (r && r.ok) showToast('✅ Base enviada ao servidor — todos verão em até 15s');
+          }).catch(function(e) { console.warn('GAS saveDBJson failed:', e); });
+          localStorage.setItem('crm_db_server_ts', String(ts));
         } catch(e) { console.warn('GAS push failed:', e); }
       }
       await saveSnapshot(semLabel || new Date().toLocaleDateString('pt-BR'));
